@@ -279,7 +279,7 @@ def main():
     solver='glucose'
     #'minicard_encodings_static'
     width = args.width
-    temp = args.temp
+    temp = os.path.abspath(args.temp)
     if instance != None:
         edge = read_edge(instance)
         g = nx.MultiGraph()
@@ -316,7 +316,7 @@ def main():
         for i in xrange(g.number_of_nodes()+2,1,-1):
             encode_time = time.time()
             encoding = generate_encoding(g, i)
-            cnf = temp + instance + '_' + str(i) + ".cnf"
+            cnf = os.path.join(temp, instance + '_' + str(i) + ".cnf")
             with open(cnf, 'w') as ofile:
                 ofile.write(encoding)
             # with open(cnf,'r') as ifile:
@@ -324,7 +324,7 @@ def main():
             #     print s
             encode_time = time.time() - encode_time
             encoding_time.append(encode_time)
-            sol = temp + instance + '_' + str(i) + '.sol'
+            sol = os.path.join(temp, instance + '_' + str(i) + ".sol")
             cmd = [solver, cnf, sol]
             # print cmd
             solving = time.time()
