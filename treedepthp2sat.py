@@ -267,6 +267,7 @@ def parse_args():
                         help='temporary folder')
     parser.add_argument('-s', '--solver', dest='solver', action='store', type=str, default='glucose',
                         help='SAT solver')
+    parser.add_argument('-n', '--no-preprocess', dest="preprocess", action='store_false', help="Turn off preprocessing")
     args = parser.parse_args()
     return args
 
@@ -298,12 +299,14 @@ def main():
     n = g.number_of_nodes()
     m = g.number_of_edges()
     prep_time = time.time()
-    g=degree_one_reduction(g=g)
     buff = 0
     lb = 0
     ub = 0
     to = False
-    g,buff=apex_vertices(g=g)
+    if args.preprocess:
+        print "preprocessing..."
+        g=degree_one_reduction(g=g)
+        g,buff=apex_vertices(g=g)
     prep_time = time.time() - prep_time
     print 'treedepthp2sat', instance, n, m,g.number_of_nodes(),buff,
     if g.number_of_nodes() <= 1:
