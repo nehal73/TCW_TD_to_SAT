@@ -11,6 +11,7 @@ import subprocess
 from networkx.drawing.nx_agraph import *
 import networkx as nx
 # import matplotlib.pyplot as plt
+import signal
 
 
 def apex_vertices(g):
@@ -252,7 +253,75 @@ def show_graph(graph, layout, nolabel=0):
     # write_dot(m, "m1.dot")
     # os.system("dot -Tps m1.dot -o m1.ps")
     nx.draw(m, pos)
-    plt.show()
+    #plt.show()
+
+
+class Timer(object):
+    def __init__(self, time_list=None):
+        self.time_list = time_list
+
+    def __enter__(self):
+        self.start = time.time()
+        self.end = self.duration = None
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.end = time.time()
+        self.duration = self.end - self.start
+        if self.time_list is not None:
+            self.time_list.append(self.duration)
+        if exc_val is None:
+            self.err = None
+        else:
+            self.err = (exc_type, exc_val, exc_tb)
+            print >> sys.stderr, "\ntimed block terminated abruptly after", self.duration, "seconds"
+            print >> sys.stderr, self.err
+
+
+def solve_component(g, cli_args):
+    lb = 0
+    ub = 0
+    to = False
+    encoding_times = list()
+    solving_times = list()
+    n = g.number_of_nodes()
+    if n <= 1:
+        return n, n, n, to, encoding_times, solving_times
+    temp = os.path.abspath(cli_args.temp)
+    instance = cli_args.instance
+    for i in xrange(g.number_of_nodes() + 2, 1, -1):
+        with Timer(time_list=encoding_times):
+            encoding = generate_encoding(g, i)
+            cnf = os.path.join(temp, instance + '_' + str(i) + ".cnf")
+            with open(cnf, 'w') as ofile:
+                ofile.write(encoding)
+        sol = os.path.join(temp, instance + '_' + str(i) + ".sol")
+        cmd = [cli_args.solver, '-cpu-lim={}'.format(cli_args.timeout), cnf, sol]
+        # print cmd
+        with Timer(time_list=solving_times):
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output, err = p.communicate()
+            rc = p.returncode
+        sys.stderr.write('*' * 10 + '\n')
+        # print output, err
+        sys.stderr.write("%i %i\n" % (i - 1, rc))
+        if rc == 0:
+            to = True
+            if lb == ub == 0:  # first timeout, record ub
+                ub = i
+        if rc == 20:
+            if to:
+                #lb = i - 2
+                lb = i
+            if lb == ub == 0:  # never timed out
+                    lb = ub = i
+            return i, lb, ub, to, encoding_times, solving_times
+
+
+def signal_handler(signum, frame):
+    print "aborting due to signal", signum
+    print "* final treedepth ?"
+    sys.exit(0)
 
 
 def parse_args():
@@ -266,7 +335,7 @@ def parse_args():
     parser.add_argument('-t', '--temp', dest='temp', action='store', type=str, default='/home/neha/temp/',
                         help='temporary folder')
     parser.add_argument('-s', '--solver', dest='solver', action='store', type=str, default='glucose',
-                        help='SAT solver')
+                        help='SAT solver')  # or 'minicard_encodings_static'
     parser.add_argument('-n', '--no-preprocess', dest="preprocess", action='store_false', help="Turn off preprocessing")
     args = parser.parse_args()
     return args
@@ -276,11 +345,6 @@ def main():
     cpu_time = time.time()
     args = parse_args()
     instance = args.instance
-    d = args.d
-    solver='glucose'
-    #'minicard_encodings_static'
-    width = args.width
-    temp = os.path.abspath(args.temp)
     if instance != None:
         edge = read_edge(instance)
         g = nx.MultiGraph()
@@ -296,63 +360,44 @@ def main():
         # g=nx.path_graph(70)
         instance = 'random'
         # show_graph(g,6)
+    args.instance = instance
     n = g.number_of_nodes()
     m = g.number_of_edges()
-    prep_time = time.time()
     buff = 0
-    lb = 0
-    ub = 0
-    to = False
-    if args.preprocess:
-        print "preprocessing..."
-        g=degree_one_reduction(g=g)
-        g,buff=apex_vertices(g=g)
-    prep_time = time.time() - prep_time
-    print 'treedepthp2sat', instance, n, m,g.number_of_nodes(),buff,
-    if g.number_of_nodes() <= 1:
-        print lb,ub,to, time.time() - cpu_time, prep_time
-        exit(0)
-    encoding_time = list()
-    solving_time = list()
-    g=nx.convert_node_labels_to_integers(g,first_label=0)
-    if width == -1:
-        for i in xrange(g.number_of_nodes()+2,1,-1):
-            encode_time = time.time()
-            encoding = generate_encoding(g, i)
-            cnf = os.path.join(temp, instance + '_' + str(i) + ".cnf")
-            with open(cnf, 'w') as ofile:
-                ofile.write(encoding)
-            # with open(cnf,'r') as ifile:
-            #     s=ifile.read()
-            #     print s
-            encode_time = time.time() - encode_time
-            encoding_time.append(encode_time)
-            sol = os.path.join(temp, instance + '_' + str(i) + ".sol")
-            cmd = [solver, cnf, sol]
-            # print cmd
-            solving = time.time()
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            output, err = p.communicate()
-            rc = p.returncode
-            solving = time.time() - solving
-            solving_time.append(solving)
-            sys.stderr.write('*' * 10+'\n')
-            # print output
-            # print err
-            sys.stderr.write("%i %i\n"%(i-1, rc))
-            if rc == 0:
-                to = True
-                if lb == 0:
-                    ub = i
-            if rc == 20:
-                if to:
-                    lb = i-2
-                # decode_output(sol=sol, g=g, width=i)
-                print i-2, lb, ub, to, time.time() - cpu_time, prep_time, sum(
-                    encoding_time), sum(solving_time),
-                for j in solving_time:
-                    print j,
-                exit(0)
+    with Timer() as prep_timer:
+        if args.preprocess:
+            print >> sys.stderr, "preprocessing..."
+            g=degree_one_reduction(g=g)
+            g,buff=apex_vertices(g=g)
+    print "* buffer verts:", buff
+    print 'treedepthp2sat', instance, n, m,g.number_of_nodes(),buff
+    if args.width != -1:
+        return
+    ncomps = nx.number_connected_components(g)
+    icomp = 1
+    global_lb, global_ub = 1e9, -1
+    for subgraph in nx.connected_component_subgraphs(g):
+        print >> sys.stderr, "\ncomponent", icomp, "of", ncomps
+        component = nx.convert_node_labels_to_integers(subgraph,first_label=0)
+        i, lb, ub, to, encoding_time, solving_time = solve_component(component, args)
+        # decode_output(sol=os.path.join(args.temp, instance + '_' + str(i+1) + ".sol"), g=component, width=i+1)
+        print i-2, lb, ub, to, time.time() - cpu_time, prep_timer.duration, \
+            sum(encoding_time), sum(solving_time),
+        for j in solving_time:
+            print j,
+        print
+        print >> sys.stderr, "* component treedepth range: [{}-{}]".format(lb, ub)
+        global_lb = min(global_lb, lb)
+        global_ub = max(global_ub, ub)
+        icomp += 1
+    print "\n* final treedepth:",
+    if global_ub == global_lb:
+        print buff + global_ub,
+    else:
+        print "[{}-{}]".format(buff + global_lb, buff + global_ub),
+    print "\ttotal-time: {:.2f}s".format(time.time()-cpu_time)
+
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGHUP, signal_handler)
     main()
