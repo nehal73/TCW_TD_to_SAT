@@ -376,6 +376,8 @@ def main():
     ncomps = nx.number_connected_components(g)
     icomp = 1
     global_lb, global_ub = 1e9, -1
+    if ncomps == 0:  # only empty graph remains after preprocessing, for loop won't be triggered
+        global_lb = global_ub = 0
     for subgraph in nx.connected_component_subgraphs(g):
         print >> sys.stderr, "\ncomponent", icomp, "of", ncomps
         component = nx.convert_node_labels_to_integers(subgraph,first_label=0)
